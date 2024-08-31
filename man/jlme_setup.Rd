@@ -13,10 +13,18 @@ stop_julia()
 
 jlme_status()
 
-jlme_setup(..., restart = FALSE, threads = NULL, verbose = interactive())
+jlme_setup(
+  ...,
+  add = NULL,
+  restart = FALSE,
+  threads = NULL,
+  verbose = interactive()
+)
 }
 \arguments{
 \item{...}{Unused}
+
+\item{add}{A character vector of additional Julia packages to add and load.}
 
 \item{restart}{Whether to run \code{stop_julia()} first, before attempting setup}
 
@@ -31,7 +39,8 @@ Invisibly returns \code{TRUE} on success
 Set up Julia connection for jlme
 }
 \examples{
-\dontshow{if (interactive()) (if (getRversion() >= "3.4") withAutoprint else force)(\{ # examplesIf}
+\dontshow{if (check_julia_ok()) (if (getRversion() >= "3.4") withAutoprint else force)(\{ # examplesIf}
+\donttest{
 # Check whether Julia installation meets requirements
 check_julia_ok()
 
@@ -43,5 +52,6 @@ jlme_status()
 
 # Stop Julia runtime
 stop_julia()
+}
 \dontshow{\}) # examplesIf}
 }

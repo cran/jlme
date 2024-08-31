@@ -92,13 +92,18 @@ jlmer <- function(formula, data, family = NULL,
 
   mod <- do.call(JuliaConnectoR::juliaCall, args_list)
 
+  # Singular fit message
+  if (issingular(mod)) {
+    message("! Singular fit")
+  }
+
   class(mod) <- c("jlme", class(mod))
   mod
 
 }
 
 is_jlmer <- function(x) {
-  is_jl(x) && JuliaConnectoR::juliaLet("x isa MixedModel", x = x)
+  is_jl(x, "MixedModel")
 }
 
 #' @export

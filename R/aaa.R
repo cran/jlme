@@ -7,7 +7,12 @@ ensure_setup <- function() {
   }
 }
 
-julia_cli <- function(x) {
+julia_cli <- function(..., code = NULL) {
+  x <- do.call(paste, list(...))
+  if (!is.null(code)) {
+    code <- do.call(paste, c(sep = "; ", as.list(code)))
+    x <- paste0(x, " '", code, "'")
+  }
   utils::tail(system2("julia", x, stdout = TRUE), 1L)
 }
 
@@ -23,6 +28,10 @@ parse_julia_version <- function(version) {
 
 julia_detect_cores <- function() {
   as.integer(julia_cli('-q -e "println(Sys.CPU_THREADS);"'))
+}
+
+loaded_libs <- function() {
+  jl_evalf("sort(string.(keys(Pkg.project().dependencies)))")
 }
 
 #' @rdname jlme_setup
@@ -49,7 +58,7 @@ jlme_status <- function() {
     cat("\n")
     cat(JuliaConnectoR::juliaCall("Pkg.status"))
   } else {
-    cat("No active Julia connection. Please call `jlme_setup()` first.")
+    message("No active Julia connection. Please call `jlme_setup()` first.")
   }
   invisible(is_setup())
 }
@@ -57,13 +66,15 @@ jlme_status <- function() {
 #' Set up Julia connection for jlme
 #'
 #' @param ... Unused
+#' @param add A character vector of additional Julia packages to add and load.
 #' @param restart Whether to run `stop_julia()` first, before attempting setup
 #' @param threads Number of threads to start Julia with. Defaults to `1`
 #' @param verbose Whether to alert setup progress. Defaults to `interactive()`
 #'
 #' @return Invisibly returns `TRUE` on success
 #' @export
-#' @examplesIf interactive()
+#' @examplesIf check_julia_ok()
+#' \donttest{
 #' # Check whether Julia installation meets requirements
 #' check_julia_ok()
 #'
@@ -75,25 +86,31 @@ jlme_status <- function() {
 #'
 #' # Stop Julia runtime
 #' stop_julia()
-jlme_setup <- function(..., restart = FALSE, threads = NULL,
+#' }
+jlme_setup <- function(...,
+                       add = NULL,
+                       restart = FALSE,
+                       threads = NULL,
                        verbose = interactive()) {
   stopifnot(
     "Failed to discover Julia installation" = JuliaConnectoR::juliaSetupOk(),
     "Julia version >=1.8 required." = julia_version_compatible()
   )
   if (restart) stop_julia()
+
+  params <- list(..., add = add, threads = threads, verbose = verbose)
   if (verbose) {
-    .jlme_setup(..., threads = threads, verbose = verbose)
+    do.call(.jlme_setup, params)
   } else {
-    suppressMessages(.jlme_setup(..., threads = threads, verbose = verbose))
+    suppressMessages(do.call(.jlme_setup, params))
   }
   invisible(TRUE)
 }
 
-.jlme_setup <- function(..., threads = threads, verbose = FALSE) {
+.jlme_setup <- function(..., add, threads, verbose = FALSE) {
   start_julia(..., threads = threads)
-  init_proj(verbose = verbose)
-  load_libs()
+  init_proj(add = add, verbose = verbose)
+  load_libs(add = add)
   message("Successfully set up Julia connection.")
   invisible(TRUE)
 }
@@ -118,22 +135,42 @@ start_julia <- function(..., threads = NULL) {
   invisible(TRUE)
 }
 
-init_proj <- function(..., verbose = FALSE) {
+# guess_BLAS <- function() {
+#   out <- tail(system(paste(
+#     'julia --project=temp -q -E',
+#     '"',
+#     "using Pkg; Pkg.add(string(:LinearAlgebra));",
+#     "using LinearAlgebra: BLAS; config = BLAS.get_config();",
+#     "join(map(x -> basename(x.libname), BLAS.get_config().loaded_libs),',');",
+#     '"'
+#   ), intern = TRUE), 1)
+#   out
+# }
+
+init_proj <- function(..., add = add, verbose = FALSE) {
+  stopifnot(is.null(add) || is.character(add))
+
+  jlme_deps <- c("JuliaFormatter", "StatsModels", "GLM", "MixedModels")
+  deps <- unique(c(add, jlme_deps))
   jl_evalf('
     using Pkg;
     Pkg.activate(; temp=true, %1$s)
-    Pkg.add(["JuliaFormatter", "StatsModels", "GLM", "MixedModels"]; %1$s)
-  ', jl_io(verbose))
+    Pkg.add(%2$s; %1$s)
+  ', jl_io(verbose), vec_to_literal(deps))
   .jlme$projdir <- dirname(jl_evalf("Base.active_project()"))
   invisible(TRUE)
 }
 
-load_libs <- function() {
+load_libs <- function(..., add) {
+  add_before <- intersect(add, c("MKL", "AppleAccelerate"))
+  for (pkg in add_before) jl_evalf("using %s;", pkg)
   jl_evalf("
     using JuliaFormatter;
     using StatsModels;
     using GLM;
     using MixedModels;
   ")
+  add_after <- setdiff(add, loaded_libs())
+  for (pkg in add_after) jl_evalf("using %s;", pkg)
   invisible(TRUE)
 }
