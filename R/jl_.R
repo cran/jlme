@@ -8,7 +8,22 @@
 #' \donttest{
 #' jlme_setup(restart = TRUE)
 #'
-#' # (Setup) Model data in R
+#' # (general) Use `jl()` to evaluate arbitrary Julia expressions from string
+#' jl("1 .+ [1,3]")
+#'
+#' # `jl()` takes elements in `...` that you can reference in the expression
+#' jl("1 .+ a", a = c(1L, 3L)) # Named arguments are introduced as variables
+#' jl("1 .+ %s", "[1,2]") # Unnamed arguments are interpolated via `sprintf()`
+#'
+#' # Use `is_jl()` to test if object is a Julia (`<JuliaProxy>`) object
+#' is_jl(jl("1"))
+#'
+#' # Use `jl_put()` and `jl_get()` to transfer data between R and Julia
+#' jl_put(1L)
+#' identical(jl_get(jl_put(1L)), 1L)
+#'
+#'
+#' # (modelling) set up model data in R
 #' x <- mtcars
 #' x$cyl_helm <- factor(x$cyl)
 #' contrasts(x$cyl_helm) <- contr.helmert(3)
@@ -35,13 +50,79 @@
 NULL
 
 #' @rdname jl-helpers
-#' @param x A string or formula object
+#' @param x An object
+#' @param type Type of Julia object to additional test for
 #' @export
-jl_formula <- function(x) {
+is_jl <- function(x, type) {
+  inherits(x, "JuliaProxy") &&
+    if (!missing(type)) { type %in% jl_supertypes(x) } else { TRUE }
+}
+
+#' @rdname jl-helpers
+#' @export
+jl_put <- function(x) {
+  stopifnot(!is_jl(x))
+  JuliaConnectoR::juliaPut(x)
+}
+
+#' @rdname jl-helpers
+#' @export
+jl_get <- function(x) {
+  stopifnot(is_jl(x))
+  x <- JuliaConnectoR::juliaGet(x)
+  JL_attr <- grep(x = names(attributes(x)), "^JL[A-Z]+$", value = TRUE)
+  attributes(x)[JL_attr] <- NULL
+  x
+}
+
+
+#' @rdname jl-helpers
+#' @param expr A string of Julia code
+#' @param ... Elements interpolated into `expr`.
+#'    - If all named, elements are introduced as Julia variables in the `expr`
+#'    - If all unnamed, elements are interpolated into `expr` via [sprintf()]
+#' @param .R Whether to simplify and return as R object, if possible.
+#' @param .passthrough Whether to return `expr` as-is if it's already a Julia
+#'   object. Mostly for internal use.
+#' @export
+jl <- function(expr, ..., .R = FALSE, .passthrough = FALSE) {
+  if (is_jl(expr) && .passthrough) return(expr)
+  dots <- list(...)
+  stopifnot(is.character(expr) && length(expr) == 1L)
+  if (is.null(dots)) {
+    # eval if no dots
+    out <- JuliaConnectoR::juliaEval(expr)
+  } else {
+    dots_names <- names(dots)
+    stopifnot(all(nzchar(dots_names)))
+    if (is.null(dots_names)) {
+      # sprintf for unnamed dots
+      s_interpolated <- do.call(sprintf, c(fmt = expr, dots))
+      out <- JuliaConnectoR::juliaEval(s_interpolated)
+    } else {
+      # let block for named dots
+      out <- do.call(JuliaConnectoR::juliaLet, c(expr = expr, dots))
+    }
+  }
+  # resolve `.R` and return as R or Julia
+  if (!.R && !is_jl(out)) {
+    out <- jl_put(out)
+  }
+  if (.R && is_jl(out)) {
+    out <- jl_get(out)
+  }
+  out
+}
+
+#' @rdname jl-helpers
+#' @param formula A string or formula object
+#' @export
+jl_formula <- function(formula) {
+  x <- formula
   if (is_jl(x)) return(x)
   x <- JuliaFormulae::julia_formula(x)
   res <- tryCatch(
-    jl_evalf("@formula(%s)", deparse1(x)),
+    jl("@formula(%s)", deparse1(x)),
     error = function(e) {
       sanitize_jl_error(e, sys.call(1))
     }
@@ -64,7 +145,11 @@ jl_contrasts <- function(df, cols = NULL, show_code = FALSE) {
   if (show_code) {
     cat(dict)
   }
-  jl_evalf(dict)
+  if (!is.null(dict)) {
+    jl(dict)
+  } else {
+    NULL
+  }
 }
 
 #' @rdname jl-helpers
@@ -73,7 +158,7 @@ jl_data <- function(df) {
   if (is_jl(df)) return(df)
   fct_cols <- Filter(is.factor, df)
   df[, colnames(fct_cols)] <- lapply(fct_cols, as.character)
-  JuliaConnectoR::juliaPut(df)
+  jl_put(df)
 }
 
 #' @rdname jl-helpers
@@ -92,7 +177,7 @@ jl_family <- function(family = c("gaussian", "binomial", "poisson")) {
       "binomial" = "Bernoulli",
       "poisson"  = "Poisson"
     )
-    family <- jl_evalf("GLM.%s()", family)
+    family <- jl("GLM.%s()", family)
     family
   } else {
     stop("Invalid input to the `family` argument.")

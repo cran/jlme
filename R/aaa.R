@@ -1,6 +1,15 @@
 #' @keywords internal
 .jlme <- new.env(parent = emptyenv())
-is_setup <- function() isTRUE(.jlme$is_setup)
+is_setup <- function() {
+  if (length(.jlme) == 0 && exists(".__DEVTOOLS__", asNamespace("jlme"))) {
+    # If setup already ran, flag it as set up
+    if (!is.null(get("pkgLocal", asNamespace("JuliaConnectoR"))$con)) {
+      message("[dev] Using prior setup: `is_setup()` is TRUE in `load_all()`")
+      return(TRUE)
+    }
+  }
+  isTRUE(.jlme$is_setup)
+}
 ensure_setup <- function() {
   if (!is_setup()) {
     jlme_setup(restart = FALSE)
@@ -13,7 +22,8 @@ julia_cli <- function(..., code = NULL) {
     code <- do.call(paste, c(sep = "; ", as.list(code)))
     x <- paste0(x, " '", code, "'")
   }
-  utils::tail(system2("julia", x, stdout = TRUE), 1L)
+  julia_cmd <- asNamespace("JuliaConnectoR")$getJuliaExecutablePath()
+  utils::tail(system2(julia_cmd, x, stdout = TRUE), 1L)
 }
 
 julia_version_compatible <- function() {
@@ -31,7 +41,7 @@ julia_detect_cores <- function() {
 }
 
 loaded_libs <- function() {
-  jl_evalf("sort(string.(keys(Pkg.project().dependencies)))")
+  jl("sort(string.(keys(Pkg.project().dependencies)))", .R = TRUE)
 }
 
 #' @rdname jlme_setup
@@ -53,14 +63,23 @@ stop_julia <- function() {
 #' @rdname jlme_setup
 #' @export
 jlme_status <- function() {
-  if (is_setup()) {
+  active <- is_setup()
+  if (active) {
+    cat("jlme", as.character(utils::packageVersion("jlme")), "\n")
+    cat(R.version.string, "\n")
     cat(JuliaConnectoR::juliaCall("versioninfo"))
-    cat("\n")
     cat(JuliaConnectoR::juliaCall("Pkg.status"))
   } else {
-    message("No active Julia connection. Please call `jlme_setup()` first.")
+    julia_cmd <- tryCatch(
+      asNamespace("JuliaConnectoR")$getJuliaExecutablePath(),
+      error = function(e) message("! ", e$message)
+    )
+    if (is.character(julia_cmd)) {
+      message("Julia version ", julia_version(), " detected.")
+      message("No active Julia connection. Please call `jlme_setup()`.")
+    }
   }
-  invisible(is_setup())
+  invisible(active)
 }
 
 #' Set up Julia connection for jlme
@@ -92,11 +111,20 @@ jlme_setup <- function(...,
                        restart = FALSE,
                        threads = NULL,
                        verbose = interactive()) {
+
   stopifnot(
     "Failed to discover Julia installation" = JuliaConnectoR::juliaSetupOk(),
     "Julia version >=1.8 required." = julia_version_compatible()
   )
-  if (restart) stop_julia()
+
+  if (!is_setup() || (restart && is_setup())) {
+    stop_julia()
+  } else {
+    message("Julia already running - skipping. Did you mean `restart = TRUE`?")
+    return(invisible(TRUE))
+  }
+
+  .jlme$julia_cmd <- asNamespace("JuliaConnectoR")$getJuliaExecutablePath()
 
   params <- list(..., add = add, threads = threads, verbose = verbose)
   if (verbose) {
@@ -104,7 +132,9 @@ jlme_setup <- function(...,
   } else {
     suppressMessages(do.call(.jlme_setup, params))
   }
+
   invisible(TRUE)
+
 }
 
 .jlme_setup <- function(..., add, threads, verbose = FALSE) {
@@ -152,25 +182,25 @@ init_proj <- function(..., add = add, verbose = FALSE) {
 
   jlme_deps <- c("JuliaFormatter", "StatsModels", "GLM", "MixedModels")
   deps <- unique(c(add, jlme_deps))
-  jl_evalf('
+  jl('
     using Pkg;
     Pkg.activate(; temp=true, %1$s)
     Pkg.add(%2$s; %1$s)
   ', jl_io(verbose), vec_to_literal(deps))
-  .jlme$projdir <- dirname(jl_evalf("Base.active_project()"))
+  .jlme$projdir <- dirname(jl("Base.active_project()", .R = TRUE))
   invisible(TRUE)
 }
 
 load_libs <- function(..., add) {
   add_before <- intersect(add, c("MKL", "AppleAccelerate"))
-  for (pkg in add_before) jl_evalf("using %s;", pkg)
-  jl_evalf("
+  for (pkg in add_before) jl("using %s;", pkg)
+  jl("
     using JuliaFormatter;
     using StatsModels;
     using GLM;
     using MixedModels;
   ")
   add_after <- setdiff(add, loaded_libs())
-  for (pkg in add_after) jl_evalf("using %s;", pkg)
+  for (pkg in add_after) jl("using %s;", pkg)
   invisible(TRUE)
 }

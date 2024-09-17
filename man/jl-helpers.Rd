@@ -2,13 +2,25 @@
 % Please edit documentation in R/jl_.R
 \name{jl-helpers}
 \alias{jl-helpers}
+\alias{is_jl}
+\alias{jl_put}
+\alias{jl_get}
+\alias{jl}
 \alias{jl_formula}
 \alias{jl_contrasts}
 \alias{jl_data}
 \alias{jl_family}
 \title{Helpers for converting model specifications in R to Julia equivalents}
 \usage{
-jl_formula(x)
+is_jl(x, type)
+
+jl_put(x)
+
+jl_get(x)
+
+jl(expr, ..., .R = FALSE, .passthrough = FALSE)
+
+jl_formula(formula)
 
 jl_contrasts(df, cols = NULL, show_code = FALSE)
 
@@ -17,7 +29,24 @@ jl_data(df)
 jl_family(family = c("gaussian", "binomial", "poisson"))
 }
 \arguments{
-\item{x}{A string or formula object}
+\item{x}{An object}
+
+\item{type}{Type of Julia object to additional test for}
+
+\item{expr}{A string of Julia code}
+
+\item{...}{Elements interpolated into \code{expr}.
+\itemize{
+\item If all named, elements are introduced as Julia variables in the \code{expr}
+\item If all unnamed, elements are interpolated into \code{expr} via \code{\link[=sprintf]{sprintf()}}
+}}
+
+\item{.R}{Whether to simplify and return as R object, if possible.}
+
+\item{.passthrough}{Whether to return \code{expr} as-is if it's already a Julia
+object. Mostly for internal use.}
+
+\item{formula}{A string or formula object}
 
 \item{df}{A data frame}
 
@@ -38,7 +67,22 @@ Helpers for converting model specifications in R to Julia equivalents
 \donttest{
 jlme_setup(restart = TRUE)
 
-# (Setup) Model data in R
+# (general) Use `jl()` to evaluate arbitrary Julia expressions from string
+jl("1 .+ [1,3]")
+
+# `jl()` takes elements in `...` that you can reference in the expression
+jl("1 .+ a", a = c(1L, 3L)) # Named arguments are introduced as variables
+jl("1 .+ \%s", "[1,2]") # Unnamed arguments are interpolated via `sprintf()`
+
+# Use `is_jl()` to test if object is a Julia (`<JuliaProxy>`) object
+is_jl(jl("1"))
+
+# Use `jl_put()` and `jl_get()` to transfer data between R and Julia
+jl_put(1L)
+identical(jl_get(jl_put(1L)), 1L)
+
+
+# (modelling) set up model data in R
 x <- mtcars
 x$cyl_helm <- factor(x$cyl)
 contrasts(x$cyl_helm) <- contr.helmert(3)
