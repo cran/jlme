@@ -27,9 +27,7 @@ parametricbootstrap <- function(x, nsim, seed, ...,
                                 optsum_overrides = list(ftol_rel = 1e-8)) {
 
   stopifnot(is_jlmer(x))
-  if (!"Random" %in% loaded_libs()) {
-    jl('Pkg.add("Random"; io=devnull); using Random;')
-  }
+  jl_require("Random")
   if (!jl("@isdefined _is_logging", .R = TRUE)) {
     # Hack to show progress when called via R
     jl("import MixedModels._is_logging")
@@ -89,9 +87,6 @@ tidy.jlmeboot <- function(x, effects = c("var_model", "ran_pars", "fixed"),
   ))
   combined <- combined[match(tidied$term, combined$term),]
 
-  switch(effects,
-    var_model = combined,
-    combined[combined$effect == effects, ]
-  )
+  resolve_effects(combined, effects)
 
 }

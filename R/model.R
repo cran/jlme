@@ -33,6 +33,15 @@
 #' glmer(r2 ~ Anger + Gender + (1 | id), VerbAgg, family = "binomial")
 #' jlmer(r2 ~ Anger + Gender + (1 | id), VerbAgg, family = "binomial")
 #'
+#' # Set optimizer options via `optsum`
+#' jlmer(
+#'   r2 ~ Anger + Gender + (1 | id), VerbAgg, family = "binomial",
+#'   optsum = list(
+#'     optimizer = jl(":LN_NELDERMEAD"),
+#'     maxfeval = 10L
+#'   )
+#' )
+#'
 #' stop_julia()
 #' }
 jlm <- function(formula, data, family = "gaussian",
@@ -42,17 +51,16 @@ jlm <- function(formula, data, family = "gaussian",
 
   args_list <- c(
     list(
-      "StatsModels.fit",
       jl("GLM.GeneralizedLinearModel"),
       jl_formula(formula),
-      jl_data(data)
+      jl_data(data),
+      jl_family(family)
     ),
-    if (!is.null(family)) list(jl_family(family)),
     if (!is.null(contrasts)) list(contrasts = contrasts),
     list(...)
   )
 
-  mod <- do.call(JuliaConnectoR::juliaCall, args_list)
+  mod <- do.call(JuliaConnectoR::juliaFun("StatsModels.fit"), args_list)
 
   class(mod) <- c("jlme", class(mod))
   mod
@@ -60,45 +68,66 @@ jlm <- function(formula, data, family = "gaussian",
 }
 
 #' @rdname jlm
+#' @param fit Whether to fit the model. If `FALSE`, returns the unfit model object.
+#' @param optsum A list of values to set for the optimizer. See `$optsum` of unfit
+#'   model for possible options.
 #' @param progress Whether to print model fitting progress. Defaults to `interactive()`
 #' @export
 jlmer <- function(formula, data, family = NULL,
                   contrasts = jl_contrasts(data),
-                  ..., progress = interactive()) {
+                  ...,
+                  fit = TRUE,
+                  optsum = list(),
+                  progress = interactive()) {
 
   ensure_setup()
 
-  model <- jl(
+  model_fun <- sprintf(
     "MixedModels.%sLinearMixedModel",
-    if (!is.null(family)) "Generalized" else ""
-  )
-
-  opts <- utils::modifyList(
-    list(progress = progress),
-    list(...)
+    if (is.null(family)) "" else "Generalized"
   )
 
   args_list <- c(
     list(
-      "StatsModels.fit",
-      model,
       jl_formula(formula),
       jl_data(data)
     ),
-    if (!is.null(family)) list(jl_family(family)),
-    if (!is.null(contrasts)) list(contrasts = contrasts),
-    opts
+    if (!is.null(family)) list(jl_family(family)), 
+    if (!is.null(contrasts)) list(contrasts = contrasts)
   )
 
-  mod <- do.call(JuliaConnectoR::juliaCall, args_list)
+  model <- do.call(JuliaConnectoR::juliaFun(model_fun), args_list)
+
+  if (length(optsum) > 0) {
+    stopifnot(
+      "Unused in `optsum`" = all(names(optsum) %in% propertynames(model$optsum))
+    )
+    optsum_keys <- lapply(names(optsum), as.symbol)
+    for (i in seq_along(optsum)) {
+      JuliaConnectoR::juliaCall("setfield!", model$optsum, optsum_keys[[i]], optsum[[i]])
+    }
+  }
+
+  if (!fit) {
+    return(model)
+  }
+
+  fit_args <- utils::modifyList(
+    list(
+      model,
+      progress = progress
+    ),
+    list(...)
+  )
+  do.call(JuliaConnectoR::juliaFun("fit!"), fit_args)
 
   # Singular fit message
-  if (issingular(mod)) {
+  if (issingular(model)) {
     message("! Singular fit")
   }
 
-  class(mod) <- c("jlme", class(mod))
-  mod
+  class(model) <- c("jlme", class(model))
+  model
 
 }
 
@@ -107,38 +136,49 @@ is_jlmer <- function(x) {
 }
 
 #' @export
-print.jlme <- function(x, type = NULL, ...) {
-  if (is_jlmer(x) && !is.null(type)) {
-    show_jlmer(x, type)
+print.jlme <- function(x, format = NULL, ...) {
+  if (is_jlmer(x) && !is.null(format)) {
+    cat(format_jlmer(x, format), "\n")
   } else {
-    cat(format(x, ...))
+    stopifnot("`format` is only availble for MixedModels" = is.null(format))
+    cat(format(x, ...), "\n")
   }
   invisible(x)
 }
 
-show_jlmer <- function(x, type = c("markdown", "latex", "html")) {
-  type <- match.arg(type)
-  JuliaConnectoR::juliaLet(
-    sprintf('show(MIME("text/%s"), x)', type),
-    x = x
+#' @export
+format.jlme <- function(x, ...) {
+  header <- paste0(
+    "<Julia object of type ",
+    JuliaConnectoR::juliaLet("typeof(x).name.wrapper", x = x),
+    ">\n\n"
+  )
+  if (is_jlmer(x)) {
+    body <- format_jlmer(x, "plain")
+  } else {
+    body <- format_jlm(x)
+  }
+  paste0(header, body)
+}
+
+capture_output <- function(x, paste = TRUE) {
+  out <- utils::capture.output(x)
+  if (paste) {
+    out <- paste0(out, collapse = "\n")
+  }
+  out
+}
+
+format_jlmer <- function(x, format = c("plain", "markdown", "html", "latex", "xelatex")) {
+  format <- match.arg(format)
+  capture_output(
+    JuliaConnectoR::juliaLet(sprintf('show(MIME("text/%s"), x)', format), x = x)
   )
 }
 
-#' @export
-format.jlme <- function(x, ...) {
-  header <- paste0("<Julia object of type ", JuliaConnectoR::juliaLet("typeof(x).name.wrapper", x = x), ">")
-  if (is_jlmer(x)) {
-    formula <- JuliaConnectoR::juliaLet("repr(x.formula)", x = x)
-    re <- gsub("\n\n$", "\n", showobj_reformat(JuliaConnectoR::juliaCall("VarCorr", x)))
-    fe <- showobj_reformat(JuliaConnectoR::juliaCall("coeftable", x))
-    body <- paste0(re, fe)
-  } else {
-    formula <- JuliaConnectoR::juliaLet("repr(x.mf.f)", x = x)
-    body <- showobj_reformat(JuliaConnectoR::juliaCall("coeftable", x))
-  }
-  paste0(header, "\n\n", formula, "\n\n", body)
-}
-
-showobj_reformat <- function(x) {
-  paste0(trimws(utils::capture.output(print(x))[-1], whitespace = "[\n]"), collapse = "\n")
+format_jlm <- function(x) {
+  form <- JuliaConnectoR::juliaLet("repr(x.mf.f)", x = x)
+  body <- capture_output(JuliaConnectoR::juliaCall("coeftable", x), FALSE)[-1]
+  body <- paste(body, collapse = "\n")
+  paste0(form, "\n\n", body)
 }

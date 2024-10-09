@@ -1,6 +1,7 @@
 #' @keywords internal
 .jlme <- new.env(parent = emptyenv())
 is_setup <- function() {
+  # nocov start
   if (length(.jlme) == 0 && exists(".__DEVTOOLS__", asNamespace("jlme"))) {
     # If setup already ran, flag it as set up
     if (!is.null(get("pkgLocal", asNamespace("JuliaConnectoR"))$con)) {
@@ -8,6 +9,7 @@ is_setup <- function() {
       return(TRUE)
     }
   }
+  # nocov end
   isTRUE(.jlme$is_setup)
 }
 ensure_setup <- function() {
@@ -16,13 +18,13 @@ ensure_setup <- function() {
   }
 }
 
-julia_cli <- function(..., code = NULL) {
+find_julia <- function() {
+  asNamespace("JuliaConnectoR")$getJuliaExecutablePath()
+}
+
+julia_cli <- function(...) {
   x <- do.call(paste, list(...))
-  if (!is.null(code)) {
-    code <- do.call(paste, c(sep = "; ", as.list(code)))
-    x <- paste0(x, " '", code, "'")
-  }
-  julia_cmd <- asNamespace("JuliaConnectoR")$getJuliaExecutablePath()
+  julia_cmd <- find_julia()
   utils::tail(system2(julia_cmd, x, stdout = TRUE), 1L)
 }
 
@@ -36,10 +38,6 @@ parse_julia_version <- function(version) {
   gsub("^julia.version .*(\\d+\\.\\d+\\.\\d+).*$", "\\1", version)
 }
 
-julia_detect_cores <- function() {
-  as.integer(julia_cli('-q -e "println(Sys.CPU_THREADS);"'))
-}
-
 loaded_libs <- function() {
   jl("sort(string.(keys(Pkg.project().dependencies)))", .R = TRUE)
 }
@@ -47,8 +45,7 @@ loaded_libs <- function() {
 #' @rdname jlme_setup
 #' @export
 check_julia_ok <- function() {
-  nzchar(Sys.which("julia")) &&
-    JuliaConnectoR::juliaSetupOk() &&
+  JuliaConnectoR::juliaSetupOk() &&
     julia_version_compatible()
 }
 
@@ -71,7 +68,7 @@ jlme_status <- function() {
     cat(JuliaConnectoR::juliaCall("Pkg.status"))
   } else {
     julia_cmd <- tryCatch(
-      asNamespace("JuliaConnectoR")$getJuliaExecutablePath(),
+      find_julia(),
       error = function(e) message("! ", e$message)
     )
     if (is.character(julia_cmd)) {
@@ -124,7 +121,7 @@ jlme_setup <- function(...,
     return(invisible(TRUE))
   }
 
-  .jlme$julia_cmd <- asNamespace("JuliaConnectoR")$getJuliaExecutablePath()
+  .jlme$julia_cmd <- find_julia()
 
   params <- list(..., add = add, threads = threads, verbose = verbose)
   if (verbose) {
@@ -138,10 +135,12 @@ jlme_setup <- function(...,
 }
 
 .jlme_setup <- function(..., add, threads, verbose = FALSE) {
+  start <- Sys.time()
   start_julia(..., threads = threads)
   init_proj(add = add, verbose = verbose)
   load_libs(add = add)
-  message("Successfully set up Julia connection.")
+  timing <- as.integer(difftime(Sys.time(), start, units = "secs"))
+  message(sprintf("Successfully set up Julia connection. (%is)", timing))
   invisible(TRUE)
 }
 
@@ -180,7 +179,7 @@ start_julia <- function(..., threads = NULL) {
 init_proj <- function(..., add = add, verbose = FALSE) {
   stopifnot(is.null(add) || is.character(add))
 
-  jlme_deps <- c("JuliaFormatter", "StatsModels", "GLM", "MixedModels")
+  jlme_deps <- c("StatsModels", "GLM", "MixedModels")
   deps <- unique(c(add, jlme_deps))
   jl('
     using Pkg;
@@ -195,7 +194,6 @@ load_libs <- function(..., add) {
   add_before <- intersect(add, c("MKL", "AppleAccelerate"))
   for (pkg in add_before) jl("using %s;", pkg)
   jl("
-    using JuliaFormatter;
     using StatsModels;
     using GLM;
     using MixedModels;

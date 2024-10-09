@@ -50,7 +50,7 @@ tidy.jlme <- function(x, effects = c("var_model", "ran_pars", "fixed"), ...) {
       re_df <- rbind(re_df, data.frame(group = "Residual", term = "sd__Observation", estimate = sigma))
     }
     if (effects == "ran_pars") {
-      out <- re_df
+      out <- cbind(effect = "ran_pars", re_df)
     } else {
       out$effect <- "fixed"
       out$group <- NA_character_
@@ -60,6 +60,9 @@ tidy.jlme <- function(x, effects = c("var_model", "ran_pars", "fixed"), ...) {
     }
     zerocorr <- (out$effect == "ran_pars") & (out$estimate == 0) & grepl("cor__", out$term)
     out <- out[!zerocorr, ]
+    if (effects == "ran_pars") {
+      out$effect <- NULL
+    }
   }
   out$term <- gsub(" & ", ":", out$term)
   out$term <- gsub(": ", "", out$term)
@@ -112,4 +115,20 @@ maybe_as_tibble <- function(x) {
     class(x) <- c("tbl_df", "tbl", class(x))
   }
   x
+}
+
+resolve_effects <- function(x, effects) {
+  switch(effects,
+    var_model = x,
+    fixed = {
+      res <- x[x$effect == "fixed",]
+      res[c("effect", "group")] <- NULL
+      res
+    },
+    ran_pars = {
+      res <- x[x$effect == "ran_pars",]
+      res$effect <- NULL
+      res
+    }
+  )
 }

@@ -1,4 +1,14 @@
-# jlme (development version)
+# jlme 0.4.0
+
+* New argument `jlmer(fit = TRUE)`. If `FALSE`, returns the unfit model object.
+
+* New function `jl_dict()` to construct a Dictionary object using `list()` syntax.
+
+* Experimental support for `MixedModels.profile()` via `profilelikelihood()` with a `tidy()` method
+
+* Experimental implementation of an interface to setting OptSummary values via `jlmer(optsum = list(...))`.
+
+* New model helper function `likelihoodratiotest()` for conducting likelihood-ratio tests on nested models
 
 # jlme 0.3.0
 
