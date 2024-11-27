@@ -1,7 +1,7 @@
 Package: jlme
 Title: Regression Modelling with 'GLM.jl' and 'MixedModels.jl' in
         'Julia'
-Version: 0.4.0
+Version: 0.4.1
 Authors@R: 
     person("June", "Choe", , "jchoe001@gmail.com", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0002-0701-921X"))
@@ -16,15 +16,16 @@ URL: https://yjunechoe.github.io/jlme/,
         https://github.com/yjunechoe/jlme/
 BugReports: https://github.com/yjunechoe/jlme/issues/
 Depends: R (>= 4.1)
-Imports: generics, JuliaConnectoR, JuliaFormulae, MASS, stats, utils
+Imports: generics, JuliaConnectoR (>= 1.1.4), JuliaFormulae, MASS,
+        stats, utils
 Suggests: broom, broom.mixed, lme4, testthat (>= 3.0.0)
 Config/testthat/edition: 3
 Encoding: UTF-8
 RoxygenNote: 7.3.2
 SystemRequirements: Julia (>= 1.8)
 NeedsCompilation: no
-Packaged: 2024-10-09 15:27:59 UTC; jchoe
+Packaged: 2024-11-27 13:00:28 UTC; jchoe
 Author: June Choe [aut, cre] (<https://orcid.org/0000-0002-0701-921X>)
 Maintainer: June Choe <jchoe001@gmail.com>
 Repository: CRAN
-Date/Publication: 2024-10-09 15:50:02 UTC
+Date/Publication: 2024-11-27 13:20:06 UTC
